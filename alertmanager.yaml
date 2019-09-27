@@ -1,0 +1,26 @@
+---
+global:
+  resolve_timeout: 10m
+  slack_api_url: https://hooks.slack.com/services/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
+
+# The root route on which each incoming alert enters.
+route:
+  receiver: team-X-slack
+  routes:
+    # The service has a sub-route for critical alerts, any alerts
+    # that do not match, i.e. severity != critical, fall-back to the
+    # parent node and are sent to 'team-X-slack'
+    routes:
+    - match:
+        severity: critical
+      receiver: team-X-slack
+
+receivers:
+- name: 'team-X-slack'
+  slack_configs:
+    - channel: '#alerts'
+      send_resolved: true
+      fields:
+        text: "test"
+        title: "alert"
+

@@ -1,0 +1,5 @@
+FROM quay.io/prometheus/busybox:latest
+
+ADD logger /bin/logger
+
+ENTRYPOINT ["/bin/logger"]

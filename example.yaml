@@ -1,0 +1,30 @@
+groups:
+- name: app
+  rules:
+  - record: app:http_requests:rate1m
+    expr: sum without (instance) (rate(opencensus_io_http_server_response_count_by_status_code_and_path{http_status!~"429"}[1m]))
+  - record: app:http_request_success:rate1m
+    expr: sum without (instance) (rate(opencensus_io_http_server_response_count_by_status_code_and_path{http_status=~"200|400|404|422"}[1m]))
+  - record: app:http_request_success_per_http_requests:ratio_rate1m
+    expr: |2
+      app:http_request_success:rate1m
+      /
+      app:http_requests:rate1m
+
+  # Authorise SLOs alerts
+  #
+  # naming convention: "<service_name>_<user-journey>_<sli_type>_<protocol>_<severity>"
+  # state: development
+  - alert: app_validate_key_availability_http_critical
+    expr: app:http_request_success_per_http_requests:ratio_rate1m{http_server_route="/"} > 14.4*0.0001 or absent(app:http_request_success_per_http_requests:ratio_rate1m{http_server_route="/"}) == 1
+    for: 1m
+    labels:
+      severity: critical # switch to critical after testing for some time
+    annotations:
+      description: Your error budget has been consumed by 2% with 14.4x burn rate or 5% with 6x burn rate. Please create an incident.
+        Debug resources
+        SLI <https://mon.messagebird.io/grafana/d/hkOcAkSWz/authorise-slis?refresh=1m&orgId=1|Dashboard>
+        SLO <https://messagebird.atlassian.net/wiki/spaces/SERV/pages/1388085289/SLIs+SLOs+per+User+journeys#SLIs&SLOsperUserjourneys-Availability|document>
+        Dependencies status <https://status.cloud.google.com/|GCP status> (GKE, Spanner)
+      summary: Authorise Validate Key SLO Availability violation in HTTP protocol
+

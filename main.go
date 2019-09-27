@@ -5,24 +5,15 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"contrib.go.opencensus.io/exporter/prometheus"
+	"go.opencensus.io/plugin/ochttp"
+	"go.opencensus.io/stats/view"
+	"go.opencensus.io/tag"
 )
 
-var (
-	version = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "version",
-		Help: "Version information about this binary",
-		ConstLabels: map[string]string{
-			"version": "v0.1.0",
-		},
-	})
-	httpRequestsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "http_requests_total",
-		Help: "Count of all HTTP requests",
-	}, []string{"code", "method"})
-)
+var ()
 
 func main() {
 	bind := ""
@@ -30,20 +21,36 @@ func main() {
 	flagset.StringVar(&bind, "bind", ":8080", "The socket to bind to.")
 	flagset.Parse(os.Args[1:])
 
-	r := prometheus.NewRegistry()
-	r.MustRegister(httpRequestsTotal)
-	r.MustRegister(version)
+	exporter, err := prometheus.NewExporter(prometheus.Options{})
+	if err != nil {
+		log.Fatal(err)
+	}
+	view.Register(
+		ochttp.ServerRequestCountView,
+		ochttp.ServerRequestBytesView,
+		ochttp.ServerResponseBytesView,
+		ochttp.ServerLatencyView,
+		ochttp.ServerRequestCountByMethod,
+		&view.View{
+			Name:        "opencensus.io/http/server/response_count_by_status_code_and_path",
+			Description: "Server response count by status code",
+			TagKeys:     []tag.Key{ochttp.StatusCode, ochttp.KeyServerRoute},
+			Measure:     ochttp.ServerLatency,
+			Aggregation: view.Count(),
+		})
 
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	view.SetReportingPeriod(1 * time.Second)
+
+	datetimeHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("Hello from example application."))
+		w.Write([]byte(time.Now().Format("2006-01-02T15:04:05Z")))
 	})
-	notfound := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	internalErr := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	})
-	http.Handle("/", promhttp.InstrumentHandlerCounter(httpRequestsTotal, handler))
-	http.Handle("/err", promhttp.InstrumentHandlerCounter(httpRequestsTotal, notfound))
+	http.Handle("/", ochttp.WithRouteTag(datetimeHandler, "/"))
+	http.Handle("/err", ochttp.WithRouteTag(internalErr, "/err"))
 
-	http.Handle("/metrics", promhttp.HandlerFor(r, promhttp.HandlerOpts{}))
-	log.Fatal(http.ListenAndServe(bind, nil))
+	http.Handle("/metrics", exporter)
+	log.Fatal(http.ListenAndServe(bind, &ochttp.Handler{}))
 }
